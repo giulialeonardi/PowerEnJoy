@@ -1,0 +1,352 @@
+open util/boolean
+
+-----------SIGNATURES-----------
+//User
+sig User {
+	credentials: one Credentials,
+	drivingLicence: one Int,
+	location: one Coordinates,
+	paymentMode: one CreditCard,
+}{
+	drivingLicence > 0}
+
+//Reservation
+sig Reservation{
+	driver: one User,
+	passengers: one Int,
+	rentedCar: one Car,
+	reservationTime: one Time,
+	pickUpTime: one Time,
+	releaseTime: one Time,
+	releaseBatteryLevel: one Int,
+	releasePlugged: one Bool,
+	finalCost: one Int,
+	otc: one Int,
+	driverQrCode: one QRCode
+}{
+	passengers>=0 and passengers <=4
+	releaseBatteryLevel >= 0 and releaseBatteryLevel <= 100
+	finalCost>0
+}
+
+//Car
+sig Car{
+	carNumber: one Int,
+	isIn: one Area,
+	location: one Coordinates,
+	belongTo:lone Reservation,
+	available: Bool,
+	battery: one Int,
+	distanceFromNearestSafeArea: one Int //kilometres
+}{
+	carNumber>=0 and
+	battery>=0 and
+	battery<=100
+	distanceFromNearestSafeArea >0
+}
+
+//Area
+abstract sig Area{
+	centre: one Coordinates,
+}
+
+sig SafeArea extends Area{
+	parkedCars: one Int,
+	special: one Bool
+}{
+	parkedCars >0
+}
+
+sig Outside extends Area{
+	squareSide: one Int
+}{
+	squareSide>0
+}
+
+//Operator
+sig Operator{
+	assignedSafeArea: one SafeArea,
+	assignedOutside: one Outside
+}
+
+//Coordinates 
+sig Coordinates{
+	longitude: one Int,
+	latitude: one Int
+}{
+	latitude >=-9 and latitude <=9
+	longitude>=0 and longitude<= 18
+}
+
+//Credit card
+sig CreditCard{
+	iban: one Int,
+	expiryDate: one Int,
+	cvv: one Int
+}{
+	iban >0 
+	cvv > 0
+	expiryDate >0
+}
+
+//Time
+sig Time{
+	hour: one Int,	
+	minute: one Int
+}{
+	hour>=00 and hour <= 23 and
+	minute>= 00 and minute<=59
+}
+
+sig CurrentTime extends Time{}
+
+//Credentials
+sig Credentials{
+}
+
+//QR code
+sig QRCode{
+}
+
+
+-----------FACTS-----------
+//Singleton current time
+fact singletonCurrentTime{
+	#CurrentTime = 1
+}
+
+//An OTC code corresponds only to one reservation
+fact oneTimeCode{
+	all r1, r2: Reservation |
+		(r1 != r2)
+			implies r1.otc != r2.otc
+}
+
+//A driver's qr code must be different for two different reservations
+fact differentQrCodes{
+	all r1, r2: Reservation |
+		(r1 != r2)
+			implies (r1.driverQrCode != r2. driverQrCode)
+}
+
+//A car reserved corresponds just to a certain reservation
+fact carLinkedToReservation{
+	no c:Car, r:Reservation | 
+		(c.belongTo=r 
+			and r.rentedCar !=c)
+}
+
+//Different cars can be reserved simultaneously only by different users
+fact uniqueCarReservation{
+	all c1,c2: Car | 
+		(c1!=c2) 
+			implies c1.belongTo != c2.belongTo
+}
+
+//Can not exist two simultaneus reservations with the same driver or the same car
+fact uniqueReservation{
+	all r1,r2 :Reservation | 
+		(r1 !=r2) 
+		and (r1.driver = r2.driver
+			or r1.rentedCar = r2.rentedCar) 
+			implies 
+				(r1.reservationTime != r2.reservationTime
+					and r1.pickUpTime != r2.pickUpTime
+						and r1.releaseTime != r2.releaseTime)
+}
+
+//Different credit cards have different ibans
+fact differentCreditCards{
+	all c1,c2 : CreditCard | 
+		(c1!=c2)
+			iff (c1.iban != c2.iban)
+}
+
+//If a car is in an area, it has the same location of the area
+fact carInAnArea{
+	all c:Car, a:Area |  
+		(c.isIn = a)
+			implies (c.location =a.centre)
+}
+
+//If there is a reservation with a certain car, that car is not available
+fact carReserved {
+	all r: Reservation, c: Car | 
+		(r.rentedCar = c)
+			implies (c.available=False)
+}
+
+//Users must have different credentials and driving licences
+fact differentCredentials{
+	all u1, u2: User | 
+		(u1!=u2) 
+			implies ( (u1.credentials != u2.credentials) 
+				and (u1.drivingLicence != u2.drivingLicence))
+}
+
+//Not available car
+fact notAvailableCar{
+	all c: Car | 
+		(c.battery<20 
+			or c.distanceFromNearestSafeArea>3) 
+				implies (c.available= False)
+}
+
+//Cars with different ID
+fact differentNumberOfCar{
+	all c1,c2: Car | 
+		(c1!=c2) 
+			implies(c1.carNumber != c2.carNumber) 
+}
+
+//The area assigned to an operator can not be assigned to an other one
+fact OneOperatorPerArea{
+	all o1, o2:Operator | 
+		(o1!=o2) 
+			implies ((o1.assignedSafeArea.centre != o2.assignedSafeArea.centre) 
+				and (o1.assignedOutside.centre != o2.assignedOutside.centre) 
+					and (o1.assignedOutside.squareSide != o2.assignedOutside.squareSide))
+}
+
+//Cars with some necessities are recovered by the operator responsible for the area in which the car is
+fact RecoverOperationOutside{
+	all o:Operator, c:Car, out:Outside | 
+		(c.battery<=20 or c.isIn=out) 
+			implies (o.assignedOutside=c.isIn)
+}
+
+fact RecoverOperationSafeArea{
+	all o:Operator, c:Car, sa:SafeArea | 
+		(c.battery<=20 or c.isIn=sa) 
+			implies (o.assignedSafeArea=c.isIn)
+}
+
+//Each operator has a different area to take after
+fact uniqueOperator{
+	all o1,o2:Operator | 
+		(o1!=o2) 
+			implies ((o1.assignedSafeArea != o2.assignedSafeArea) 
+				and (o1.assignedOutside != o2.assignedOutside))
+}
+
+//Each area has only one operator
+fact oneOperatorPerArea{
+	one o: Operator | 
+		all sa: SafeArea, out: Outside | 
+			(o.assignedSafeArea = sa 
+				and o.assignedOutside = out)
+}
+
+//Two different safe areas have different coordinates
+fact differentSafeAreas{
+	all sa1, sa2: SafeArea | 
+		(sa1 != sa2) 
+			iff (sa1.centre != sa2.centre) 
+}
+
+//Two different outside areas have different coordinates
+fact differentOutsides{
+	all out1, out2: Outside | 
+		(out1 != out2) 
+			iff (out1.centre != out2.centre) 
+}
+
+
+//Every outside is linked to a save area
+fact outsideLinkedToSafeArea{
+	all o: Operator | 
+		o.assignedOutside.centre = o.assignedSafeArea.centre
+}
+
+
+//Pickup time has to be major than reservation time
+fact reservationPickUpConstraints1{
+	all r: Reservation | 
+		(r.reservationTime.hour < r.pickUpTime.hour) 
+			or ((r.reservationTime.hour = r.pickUpTime.hour) 
+				and (r.reservationTime.minute < r.pickUpTime.minute)) 
+}
+
+//Time for the reservation
+fact atMostOneHourOfReservation{
+	all r: Reservation | 
+		(r.pickUpTime.hour < r.reservationTime.hour+1) 
+		or ((r.pickUpTime.hour = r.reservationTime.hour +1) 
+			and (r.pickUpTime.minute < r.reservationTime.minute))
+}	
+
+//Release time must major than pickup time
+fact pickupBeforeRelease{
+	all r: Reservation | 
+		(r.pickUpTime.hour < r.releaseTime.hour) 
+			or ((r.pickUpTime.hour = r.releaseTime.hour) 
+				and (r.pickUpTime.minute < r.releaseTime.minute)) 
+}
+
+
+
+-----------ASSERTIONS-----------
+
+assert availability{
+	all ct: CurrentTime, t:Time, c: Car, r:Reservation | (r.rentedCar = c) and (r.reservationTime = t) and moreThanOrEqual[ct, t] 
+	implies c.available = False
+}
+
+assert reservationExpired{
+	all r: Reservation, ct: CurrentTime | moreOrEqualToOneHour[r.reservationTime, ct]
+	implies
+	r.rentedCar.available = True
+}
+
+assert noUbiquity{
+	no disj c1, c2 : Car | all r:Reservation | c1.belongTo = r and c2.belongTo =r
+}
+
+assert notAvailable{
+	all c: Car | c.battery < 20 or c.distanceFromNearestSafeArea > 3
+		implies c.available = False
+}
+
+
+
+-----------PREDICATES-----------
+
+pred moreThanOrEqual [t1, t2: Time]{
+	t1.hour = t2.hour
+	implies t1.minute >= t2.minute
+	else t1.hour >= t2.hour 
+}
+
+pred moreOrEqualToOneHour[t1, t2: Time]{
+	(t2.hour = t1.hour+1) and (t1.minute>=t2.minute)
+	or (t2.hour > t1.hour+1) 
+}
+
+
+pred show {
+	#User = 1
+	#Reservation =1
+	#Car = 1 
+}
+
+pred showTwoUsers{
+	#User = 2
+	#Reservation = 2
+	#Car=2
+}
+
+pred showConflict{
+	#User = 2
+	#Reservation = 2
+	#Car=1
+}
+
+
+
+//check availability for 8 Int
+//check reservationExpired for 8 Int
+//check noUbiquity for 8 Int
+//check notAvailable for 8 Int
+run show for 8 Int 
+//run showTwoUsers for 8 Int
+//run showConflict for 8 Int
